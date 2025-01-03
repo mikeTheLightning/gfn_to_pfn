@@ -90,22 +90,22 @@ static const struct proc_ops gfn_fops = {
 
 static int __init gfn_module_init(void)
 {
-    proc_entry = proc_create("gfn_to_hva", 0666, NULL, &gfn_fops);
+    proc_entry = proc_create("gfn_to_pfn", 0666, NULL, &gfn_fops);
     if (!proc_entry)
         return -ENOMEM;
-    printk(KERN_INFO "GFN to HVA module loaded\n");
+    printk(KERN_INFO "GFN to PFN module loaded\n");
     return 0;
 }
 
 static void __exit gfn_module_exit(void)
 {
     proc_remove(proc_entry);
-    printk(KERN_INFO "GFN to HVA module unloaded\n");
+    printk(KERN_INFO "GFN to PFN module unloaded\n");
 }
 
 module_init(gfn_module_init);
 module_exit(gfn_module_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Your Name");
-MODULE_DESCRIPTION("GFN to HVA translation module");
+MODULE_AUTHOR("Edward");
+MODULE_DESCRIPTION("GFN to PFN translation module");
