@@ -5,7 +5,7 @@ A Linux kernel module that enables translation between Guest Frame Numbers (GFN)
 ## Overview
 
 This kernel module provides functionality to:
-1. Translate Guest Frame Numbers (GFN) to Host Virtual Addresses (HVA)
+1. Translate Guest Frame Numbers (GFN) to Host Virtual Addresses (HVA) and Host Physical Adresses (PFN)
 2. Retrieve physical page information for given virtual addresses
 3. Detect and report hugepage usage
 4. Interface with KVM (Kernel-based Virtual Machine) for VM memory management
@@ -25,7 +25,7 @@ make
 
 2. Load the module:
 ```bash
-sudo insmod gfn_to_hva.ko
+sudo insmod gfn_to_pfn.ko
 ```
 
 ## Usage
@@ -34,7 +34,7 @@ The module creates a procfs entry at `/proc/gfn_to_hva`. To use the module:
 
 1. Write a GFN value to the proc entry:
 ```bash
-echo "0x1234" > /proc/gfn_to_hva
+echo "0x1234" > /proc/gfn_to_pfn
 ```
 
 2. Check kernel logs for the translation results:
