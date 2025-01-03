@@ -1,11 +1,11 @@
-# GFN to HVA Translation Module
+# GFN to PFN Translation Module
 
-A Linux kernel module that enables translation between Guest Frame Numbers (GFN) and Host Virtual Addresses (HVA), with additional physical page information retrieval capabilities.
+A Linux kernel module that enables translation between Guest Frame Numbers (GFN) and Host Virtual Addresses (HVA)/Physical Frame Numbers (PFN), with additional physical page information retrieval capabilities.
 
 ## Overview
 
 This kernel module provides functionality to:
-1. Translate Guest Frame Numbers (GFN) to Host Virtual Addresses (HVA) and Host Physical Adresses (PFN)
+1. Translate Guest Frame Numbers (GFN) to Host Virtual Addresses (HVA) and Host Physical Addresses (PFN)
 2. Retrieve physical page information for given virtual addresses
 3. Detect and report hugepage usage
 4. Interface with KVM (Kernel-based Virtual Machine) for VM memory management
@@ -15,6 +15,40 @@ This kernel module provides functionality to:
 - Linux kernel headers
 - KVM support enabled in the kernel
 - Root privileges for module installation and usage
+- Modified kernel with exposed vm_list symbol
+
+## Required Kernel Modification
+
+Before using this module, you must modify the kernel to expose the vm_list symbol:
+
+1. Locate the KVM main source file:
+```bash
+cd /path/to/kernel/source/virt/kvm/kvm_main.c
+```
+
+2. Find the vm_list declaration:
+```c
+LIST_HEAD(vm_list);
+```
+
+3. Add the export symbol immediately after:
+```c
+LIST_HEAD(vm_list);
+EXPORT_SYMBOL(vm_list);
+```
+
+4. Rebuild and install the kernel:
+```bash
+make -j$(nproc)
+sudo make modules_install
+sudo make install
+```
+
+5. Update bootloader and reboot:
+```bash
+sudo update-grub
+sudo reboot
+```
 
 ## Installation
 
@@ -30,7 +64,7 @@ sudo insmod gfn_to_pfn.ko
 
 ## Usage
 
-The module creates a procfs entry at `/proc/gfn_to_hva`. To use the module:
+The module creates a procfs entry at `/proc/gfn_to_pfn`. To use the module:
 
 1. Write a GFN value to the proc entry:
 ```bash
@@ -68,10 +102,9 @@ page is part of THP
 - `gfn_write()`: Handles user input through the proc interface
 
 ### Memory Management
-
 - Pages are properly acquired using `get_user_pages_remote()`
 - References are released using `put_page()`
-
+  
 ### Hugepage Detection
 
 The module includes hugepage detection with two methods:
@@ -87,4 +120,3 @@ This module is licensed under GPL. See the MODULE_LICENSE declaration in the sou
 ## Author
 
 Edward Guo
-
