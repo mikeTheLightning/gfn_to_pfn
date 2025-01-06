@@ -3,7 +3,7 @@
 A Linux kernel module that enables translation between Guest Frame Numbers (GFN) and Host Virtual Addresses (HVA)/Physical Frame Numbers (PFN), with additional physical page information retrieval capabilities.
 
 ## Overview
-
+NOTE- THIS IS DESIGNED TO BE USED ON THE HOST;
 This kernel module provides functionality to:
 1. Translate Guest Frame Numbers (GFN) to Host Virtual Addresses (HVA) and Host Physical Addresses (PFN)
 2. Retrieve physical page information for given virtual addresses
