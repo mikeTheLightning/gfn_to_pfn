@@ -43,7 +43,8 @@ LIST_HEAD(vm_list);
 EXPORT_SYMBOL(vm_list);
 ```
 
-> [!IMPORTANT] If you want to use the `reader.c` program:
+> [!IMPORTANT]
+> If you want to use the `reader.c` program:
 > You need to disable the `CONFIG_STRICT_DEVMEM` option from your `.config` (set to `n`).
 > Or change the state from `[*]` to `[ ]` if using the interactive `.config` editor.
 > `reader.c` reads from an arbitrary physical address to verify the results written by the VM.
