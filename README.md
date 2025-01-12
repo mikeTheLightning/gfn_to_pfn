@@ -78,7 +78,8 @@ sudo insmod gfn_to_pfn.ko
 
 ## Usage
 
-> [!IMPORTANT] Addresses written to the proc entry need to be the guest's FRAME number.
+> [!IMPORTANT]
+> Addresses written to the proc entry need to be the guest's frame number.
 > Giving an address from the VM's proccess's virtual address space does not work.
 > You first need to read the process's pagemap to retrieve the frame number within the VM
 > associated with that virtual address, pause the program before its termination in the VM 
