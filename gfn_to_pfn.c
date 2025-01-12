@@ -8,79 +8,104 @@
 static struct proc_dir_entry *proc_entry;
 #include <asm/pgtable.h>
 
-
-
-
-static long get_user_page_info(struct mm_struct *mm, unsigned long va)
+// get page info and translate addr
+static long get_user_page_info(struct mm_struct *mm, unsigned long va, unsigned long gpa)
 {
-	long ret;
-	int locked = 0;
-	struct page *pages[1] = { NULL };
-	ret = get_user_pages_remote(mm, va, 1, FOLL_GET, pages, NULL);
-	if (ret < 0) {
-        	pr_err("get_user_pages_remote failed with %ld\n", ret);
-		return ret;
-	}
-	if (ret == 0) {
-        	pr_err("No pages were returned for VA 0x%lx\n", va);
-        	return 0;
-	}
-	struct page *page = pages[0];
-	unsigned long pfn = page_to_pfn(page);
-	phys_addr_t phys = PFN_PHYS(pfn);
-	printk(KERN_INFO "Page Found for VA");
-	printk(KERN_INFO "Physical Address:0x%llx", (unsigned long long)phys);
-	printk(KERN_INFO "WARNING This is using PageTransHuge and PageHuge utilities to detect a hugepage i don't trust them");
-	//Note that if a page huge is declared it's probably a huge page. But I don't quite trust a non-huge page detection to detect if it isn't yet 
-	if (PageTransHuge(page)) {
-		printk(KERN_INFO "page is part of THP\n");
-	} else if (PageHuge(page)) {
-		printk(KERN_INFO "page is huge\n");
-	} else {
-		printk(KERN_INFO "page is not huge page\n");
-	}
-	put_page(page);
-	return ret;
+    long ret;
+    struct page *pages[1] = { NULL };
+    
+    unsigned long base_va = va & PAGE_MASK;
+    unsigned long offset = va & 0xFFF;
+    
+    ret = get_user_pages_remote(mm, base_va, 1, FOLL_GET, pages, NULL);
+    if (ret < 0) {
+        pr_err("get_user_pages_remote failed with %ld\n", ret);
+        return ret;
+    }
+    if (ret == 0) {
+        pr_err("No pages were returned for VA 0x%lx\n", va);
+        return 0;
+    }
+    
+    struct page *page = pages[-1];
+    unsigned long pfn = page_to_pfn(page);
+    phys_addr_t phys_base = PFN_PHYS(pfn);
+    phys_addr_t exact_phys = phys_base | offset;
+    
+    //Note that if a page huge is declared it's probably a huge page. But I don't quite trust a non-huge page detection to detect if it isn't yet
+    if (PageTransHuge(page)) {
+        printk(KERN_INFO "page is part of THP\n");
+    } else if (PageHuge(page)) {
+        printk(KERN_INFO "page is huge\n");
+    } else {
+        printk(KERN_INFO "page is not huge page\n");
+    }
+    
+    printk(KERN_INFO "exact phys addr for gpa 0x%lx: 0x%llx\n", 
+           gpa, (unsigned long long)exact_phys);
+    
+    put_page(page);
+    return ret;
 }
 
-
-
-static void print_gfn_to_hva(unsigned long gfn_val)
+static void print_gfn_to_hva(unsigned long full_gfn)
 {
-    	struct kvm *kvm;
-    	unsigned long hva;
-    	gfn_t gfn = (gfn_t)gfn_val;
-	//find first kvm - this needs expanding for variable # of kvms
-    	kvm = list_first_entry_or_null(&vm_list, struct kvm, vm_list);
-    	if (!kvm) {
-        	printk(KERN_ERR "No VMs found\n");
-        	return;
-    	}
-    	printk(KERN_INFO "Found VM\n");
-    	hva = gfn_to_hva(kvm, gfn);
-    	if (kvm_is_error_hva(hva)) {
-        	printk(KERN_ERR "Error getting HVA for GFN 0x%lx\n", gfn_val);
-        	return;
-    	}
-	printk(KERN_INFO "GFN 0x%lx maps to HVA 0x%lx\n", gfn_val, hva);
-	get_user_page_info(kvm->mm,hva);
+    struct kvm *kvm;
+    unsigned long hva;
+    gfn_t gfn = (gfn_t)(full_gfn >> 12);
+    unsigned long offset = full_gfn & 0xFFF;
+    
+    //find first kvm - this needs expanding for variable # of kvms
+    kvm = list_first_entry_or_null(&vm_list, struct kvm, vm_list);
+    if (!kvm) {
+        printk(KERN_ERR "No VMs found\n");
+        return;
+    } else {
+        printk("Found VM: %d", kvm);
+    }
+    
+    hva = gfn_to_hva(kvm, gfn);
+    if (kvm_is_error_hva(hva)) {
+        printk(KERN_ERR "Error getting HVA for GFN 0x%lx\n", (unsigned long)gfn);
+        return;
+    }
+    
+    hva |= offset;
+    get_user_page_info(kvm->mm, hva, full_gfn);
 }
 
-
+// proc entry
 static ssize_t gfn_write(struct file *file, const char __user *ubuf,
                         size_t count, loff_t *ppos)
 {
-    //get gfn from buffer
-    char buf[32];
-    unsigned long gfn;
-    if (count > sizeof(buf) - 1)
-        return -EINVAL;
-    if (copy_from_user(buf, ubuf, count))
+    char *kbuf, *token, *cur;
+    unsigned long addr;
+    
+    kbuf = kmalloc(count + 1, GFP_KERNEL);
+    if (!kbuf)
+        return -ENOMEM;
+    
+    if (copy_from_user(kbuf, ubuf, count)) {
+        kfree(kbuf);
         return -EFAULT;
-    buf[count] = '\0';
-    if (kstrtoul(buf, 0, &gfn))
-        return -EINVAL;
-    print_gfn_to_hva(gfn);
+    }
+    kbuf[count] = '\0';
+    
+    printk(KERN_INFO "WARNING This is using PageTransHuge and PageHuge utilities to detect a hugepage i don't trust them\n");
+    
+    cur = kbuf;
+    // multi address insertion. delimeter = " "
+    while ((token = strsep(&cur, " ")) != NULL) {
+        if (*token == '\0')
+            continue;
+            
+        if (kstrtoul(token, 0, &addr))
+            continue;
+            
+        print_gfn_to_hva(addr);
+    }
+    
+    kfree(kbuf);
     return count;
 }
 
@@ -97,6 +122,7 @@ static int __init gfn_module_init(void)
     return 0;
 }
 
+// cleanup
 static void __exit gfn_module_exit(void)
 {
     proc_remove(proc_entry);
@@ -108,4 +134,4 @@ module_exit(gfn_module_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Edward");
-MODULE_DESCRIPTION("GFN to PFN translation module");
+MODULE_DESCRIPTION("GFN to PFN translation module with multi-address support");
