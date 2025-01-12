@@ -1,7 +1,8 @@
 # GFN to PFN Translation Module
 
-A Linux kernel module that enables translation from Guest Frame Numbers (GFN)
-to Host Virtual Addresses (HVA) and Physical Frame Numbers (PFN), with additional physical page information retrieval capabilities.
+Translate a Frame Number in a Guest/VM (GFN or Guest Frame Number) to the physical address
+mapped to the GFN on the host's Physical Frame Number (PFN), with addition physical page 
+inforamtion retrieval capabilities, i.e. being backed by HP or THP.
 
 ## Overview
 > [!NOTE]  
