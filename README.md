@@ -43,7 +43,8 @@ LIST_HEAD(vm_list);
 EXPORT_SYMBOL(vm_list);
 ```
 
-> [!IMPORTANT] If you want to use the `reader.c` program:
+> [!IMPORTANT]
+> If you want to use the `reader.c` program:
 > You need to disable the `CONFIG_STRICT_DEVMEM` option from your `.config` (set to `n`).
 > Or change the state from `[*]` to `[ ]` if using the interactive `.config` editor.
 > `reader.c` reads from an arbitrary physical address to verify the results written by the VM.
@@ -77,7 +78,8 @@ sudo insmod gfn_to_pfn.ko
 
 ## Usage
 
-> [!IMPORTANT] Addresses written to the proc entry need to be the guest's FRAME number.
+> [!IMPORTANT]
+> Addresses written to the proc entry need to be the guest's frame number.
 > Giving an address from the VM's proccess's virtual address space does not work.
 > You first need to read the process's pagemap to retrieve the frame number within the VM
 > associated with that virtual address, pause the program before its termination in the VM 
