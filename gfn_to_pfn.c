@@ -48,49 +48,38 @@ static long get_user_page_info(struct mm_struct *mm, unsigned long va,
 }
 
 // process single gfn and get hva
-static void print_gfn_to_hva(unsigned long vm_id, unsigned long full_gfn) {
-  struct kvm *kvm;
+static void print_gfn_to_hva(struct kvm *kvm, unsigned long full_gfn) {
   unsigned long hva;
   gfn_t gfn = (gfn_t)(full_gfn >> 12);
   unsigned long offset = full_gfn & 0xFFF;
-  bool found = false;
 
-  list_for_each_entry(kvm, &vm_list, vm_list) {
-    if (kvm->userspace_pid == vm_id) { // match VM by PID (from qemu)
-      found = true;
-      break;
-    }
-  }
-
-  if (!found) {
-    printk(KERN_ERR "No VM with id=%lu found\n", vm_id);
+  if (!kvm) {
+    printk(KERN_ERR "No VM provided to print_gfn_to_hva\n");
     return;
   }
 
-  printk(KERN_INFO "Found VM %p (pid=%d) for vm_id=%lu\n", kvm,
-         kvm->userspace_pid, vm_id);
-
   hva = gfn_to_hva(kvm, gfn);
   if (kvm_is_error_hva(hva)) {
-    printk(KERN_ERR "Error getting HVA for GFN 0x%lx in VM %lu\n",
-           (unsigned long)gfn, vm_id);
+    printk(KERN_ERR "Error getting HVA for GFN 0x%lx (vm pid=%d)\n",
+           (unsigned long)gfn, kvm->userspace_pid);
     return;
   }
 
   hva |= offset;
-
-  // Use the VM’s memory map
   get_user_page_info(kvm->mm, hva, full_gfn);
 }
 
-// handle write to proc entry. e.g., echo "7 0x1234" > /proc/gfn_to_pfn
+// handle write to proc entry
+// Usage:
+//   echo "0x1234"          > /proc/gfn_to_pfn   # address only → first VM
+//   echo "0x1234 12345"    > /proc/gfn_to_pfn   # address + pid → explicit VM
 static ssize_t gfn_write(struct file *file, const char __user *ubuf,
                          size_t count, loff_t *ppos) {
-  char *kbuf, *cur;
-  char *token;
-  unsigned long vm_id = 0;
+  char *kbuf, *cur, *token;
   unsigned long addr = 0;
-  int got_vm = 0, got_addr = 0;
+  unsigned long vm_pid = 0;
+  int got_addr = 0, got_pid = 0;
+  struct kvm *kvm = NULL;
 
   kbuf = kmalloc(count + 1, GFP_KERNEL);
   if (!kbuf)
@@ -101,34 +90,56 @@ static ssize_t gfn_write(struct file *file, const char __user *ubuf,
     return -EFAULT;
   }
   kbuf[count] = '\0';
-
-  printk(KERN_INFO "gfn_write: expecting input '<vm_pid> <gfn>'\n");
-
   cur = kbuf;
 
-  // first token = vm_id
-  token = strsep(&cur, " ");
-  if (token && *token) {
-    if (!kstrtoul(token, 0, &vm_id))
-      got_vm = 1;
-  }
-
-  // second token = gfn
+  // first token = address
   token = strsep(&cur, " ");
   if (token && *token) {
     if (!kstrtoul(token, 0, &addr))
       got_addr = 1;
   }
 
-  if (!got_vm || !got_addr) {
-    printk(KERN_ERR "gfn_write: invalid input, need '<vm_pid> <gfn>'\n");
+  // second token (optional) = vm pid
+  token = strsep(&cur, " ");
+  if (token && *token) {
+    if (!kstrtoul(token, 0, &vm_pid))
+      got_pid = 1;
+  }
+
+  if (!got_addr) {
+    printk(KERN_ERR "gfn_write: invalid input, need '<addr> [vm_pid]'\n");
     kfree(kbuf);
     return -EINVAL;
   }
 
-  printk(KERN_INFO "gfn_write: vm_id=%lu, gfn=0x%lx\n", vm_id, addr);
+  if (got_pid) {
+    bool found = false;
+    list_for_each_entry(kvm, &vm_list, vm_list) {
+      if (kvm->userspace_pid == vm_pid) {
+        found = true;
+        printk(KERN_INFO "Found VM %p (pid=%d)\n", kvm, kvm->userspace_pid);
+        break;
+      }
+    }
+    if (!found) {
+      printk(KERN_ERR "No VM with pid=%lu found\n", vm_pid);
+      kfree(kbuf);
+      return -ESRCH;
+    }
+  } else {
+    // default: use first VM
+    kvm = list_first_entry_or_null(&vm_list, struct kvm, vm_list);
+    if (!kvm) {
+      printk(KERN_ERR "No VMs available (default mode)\n");
+      kfree(kbuf);
+      return -ESRCH;
+    }
+    printk(KERN_INFO "Using first VM %p (pid=%d)\n", kvm, kvm->userspace_pid);
+  }
 
-  print_gfn_to_hva(vm_id, addr);
+  printk(KERN_INFO "gfn_write: gfn=0x%lx, vm_pid=%s\n", addr,
+         got_pid ? kasprintf(GFP_KERNEL, "%lu", vm_pid) : "first");
+  print_gfn_to_hva(kvm, addr);
 
   kfree(kbuf);
   return count;
