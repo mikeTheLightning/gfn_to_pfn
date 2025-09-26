@@ -12,4 +12,10 @@ default:
 
 clean:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+	rm -f gfn_test
+
+gfn_test: gfn_test.c
+	$(CC) -Wall -Wextra -std=c11 -o $@ $<
+
+.PHONY: clean
 endif
