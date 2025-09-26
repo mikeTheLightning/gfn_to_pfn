@@ -171,6 +171,30 @@ $ sudo ./reader 0x412380
 24
 ```
 
+### gfn_test helper
+
+Build the lightweight host-side client with the provided make target:
+```bash
+make gfn_test
+```
+
+Run it to send a single query to `/proc/gfn_to_pfn` and print the reply that the
+kernel module makes available through the proc file:
+```bash
+sudo ./gfn_test 0x1234
+Kernel reply: ok phys=0x1ad725234 kind=base gpa=0x1234 hva=0xffff9d7bc000
+```
+
+You can optionally specify a VM PID to select a particular KVM instance when
+multiple VMs are running:
+```bash
+sudo ./gfn_test 0x1234 4242
+```
+
+The helper opens the proc entry, writes the GFN (and optional PID), then reads
+the module's formatted response—handy for quick validation without tailing
+kernel logs.
+
 ## Implementation Details
 
 ### Key Functions
