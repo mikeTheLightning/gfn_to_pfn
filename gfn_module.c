@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/poll.h>
 #include <linux/proc_fs.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 
@@ -34,6 +35,23 @@ static void gfn_ctx_reply(struct gfn_ctx *ctx, const char *fmt, ...) {
   va_start(args, fmt);
   ctx->reply_len = vscnprintf(ctx->reply, REPLY_MAX, fmt, args);
   va_end(args);
+}
+
+static void gfn_log_result(const struct gfn_request *req, const struct kvm *kvm,
+                           const char *reply) {
+  unsigned long pid = 0;
+  char msg[REPLY_MAX];
+
+  if (kvm)
+    pid = kvm->userspace_pid;
+  else if (req && req->has_pid)
+    pid = req->vm_pid;
+
+  strlcpy(msg, reply ? reply : "", sizeof(msg));
+  strim(msg);
+
+  pr_info("gfn_to_pfn: pid=%lu gfn=0x%lx %s", pid,
+          req ? req->raw_gfn : 0UL, msg[0] ? msg : "(empty reply)");
 }
 
 /* --- helper: format info about page --- */
@@ -132,6 +150,7 @@ static ssize_t gfn_write(struct file *file, const char __user *ubuf,
 
   if (gfn_parse_request(kbuf, &req)) {
     gfn_ctx_reply(ctx, "err:invalid_input\n");
+    gfn_log_result(&req, NULL, ctx->reply);
     goto out_ready;
   }
 
@@ -139,23 +158,27 @@ static ssize_t gfn_write(struct file *file, const char __user *ubuf,
     int rc = find_kvm_by_pid(req.vm_pid, &kvm);
     if (rc) {
       gfn_ctx_reply(ctx, "err:no_vm pid=%lu\n", req.vm_pid);
+      gfn_log_result(&req, NULL, ctx->reply);
       goto out_ready;
     }
   } else {
     kvm = list_first_entry_or_null(&vm_list, struct kvm, vm_list);
     if (!kvm) {
       gfn_ctx_reply(ctx, "err:no_vms\n");
+      gfn_log_result(&req, NULL, ctx->reply);
       goto out_ready;
     }
   }
 
   if (gfn_to_hva_safe(kvm, req.raw_gfn, &hva)) {
     gfn_ctx_reply(ctx, "err:hva gfn=0x%lx\n", req.raw_gfn);
+    gfn_log_result(&req, kvm, ctx->reply);
     goto out_ready;
   }
 
   n = format_page_info(ctx->reply, REPLY_MAX, kvm->mm, hva, req.raw_gfn);
   ctx->reply_len = clamp_t(ssize_t, n, 0, REPLY_MAX);
+  gfn_log_result(&req, kvm, ctx->reply);
 
 out_ready:
   ctx->reply_ready = true;
