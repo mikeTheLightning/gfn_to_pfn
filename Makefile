@@ -1,5 +1,6 @@
 ifneq ($(KERNELRELEASE),)
-   obj-m := gfn_to_pfn.o
+gfn_to_pfn-y := gfn_module.o gfn_parse.o
+obj-m := gfn_to_pfn.o
 else
 
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build

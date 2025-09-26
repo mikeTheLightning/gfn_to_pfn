@@ -4,11 +4,14 @@
 #include <linux/kvm.h>
 #include <linux/kvm_host.h>
 #include <linux/mm.h>
+#include <linux/huge_mm.h>
 #include <linux/module.h>
 #include <linux/poll.h>
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
+
+#include "gfn_parse.h"
 
 #define PROC_NAME "gfn_to_pfn"
 #define REPLY_MAX 256
@@ -21,6 +24,17 @@ struct gfn_ctx {
 };
 
 static struct proc_dir_entry *proc_entry;
+
+static void gfn_ctx_reply(struct gfn_ctx *ctx, const char *fmt, ...)
+    __printf(2, 3);
+
+static void gfn_ctx_reply(struct gfn_ctx *ctx, const char *fmt, ...) {
+  va_list args;
+
+  va_start(args, fmt);
+  ctx->reply_len = vscnprintf(ctx->reply, REPLY_MAX, fmt, args);
+  va_end(args);
+}
 
 /* --- helper: format info about page --- */
 static ssize_t format_page_info(char *dst, size_t cap, struct mm_struct *mm,
@@ -100,55 +114,47 @@ static int gfn_release(struct inode *ino, struct file *f) {
 static ssize_t gfn_write(struct file *file, const char __user *ubuf,
                          size_t count, loff_t *ppos) {
   struct gfn_ctx *ctx = file->private_data;
-  char kbuf[64];
-  char *cur, *tok;
-  unsigned long addr = 0, vm_pid = 0;
-  bool got_addr = false, got_pid = false;
+  struct gfn_request req;
   struct kvm *kvm = NULL;
   unsigned long hva;
   ssize_t n;
+  char kbuf[64];
 
   if (count >= sizeof(kbuf))
     return -E2BIG;
+
   if (copy_from_user(kbuf, ubuf, count))
     return -EFAULT;
+
   kbuf[count] = '\0';
-  cur = kbuf;
+  ctx->reply_ready = false;
+  ctx->reply_len = 0;
 
-  tok = strsep(&cur, " \t\n");
-  if (tok && *tok && !kstrtoul(tok, 0, &addr))
-    got_addr = true;
-  tok = strsep(&cur, " \t\n");
-  if (tok && *tok && !kstrtoul(tok, 0, &vm_pid))
-    got_pid = true;
-
-  if (!got_addr) {
-    ctx->reply_len = scnprintf(ctx->reply, REPLY_MAX, "err:invalid_input\n");
+  if (gfn_parse_request(kbuf, &req)) {
+    gfn_ctx_reply(ctx, "err:invalid_input\n");
     goto out_ready;
   }
 
-  if (got_pid) {
-    int rc = find_kvm_by_pid(vm_pid, &kvm);
+  if (req.has_pid) {
+    int rc = find_kvm_by_pid(req.vm_pid, &kvm);
     if (rc) {
-      ctx->reply_len =
-          scnprintf(ctx->reply, REPLY_MAX, "err:no_vm pid=%lu\n", vm_pid);
+      gfn_ctx_reply(ctx, "err:no_vm pid=%lu\n", req.vm_pid);
       goto out_ready;
     }
   } else {
     kvm = list_first_entry_or_null(&vm_list, struct kvm, vm_list);
     if (!kvm) {
-      ctx->reply_len = scnprintf(ctx->reply, REPLY_MAX, "err:no_vms\n");
+      gfn_ctx_reply(ctx, "err:no_vms\n");
       goto out_ready;
     }
   }
 
-  if (gfn_to_hva_safe(kvm, addr, &hva)) {
-    ctx->reply_len =
-        scnprintf(ctx->reply, REPLY_MAX, "err:hva gfn=0x%lx\n", addr);
+  if (gfn_to_hva_safe(kvm, req.raw_gfn, &hva)) {
+    gfn_ctx_reply(ctx, "err:hva gfn=0x%lx\n", req.raw_gfn);
     goto out_ready;
   }
 
-  n = format_page_info(ctx->reply, REPLY_MAX, kvm->mm, hva, addr);
+  n = format_page_info(ctx->reply, REPLY_MAX, kvm->mm, hva, req.raw_gfn);
   ctx->reply_len = clamp_t(ssize_t, n, 0, REPLY_MAX);
 
 out_ready:
