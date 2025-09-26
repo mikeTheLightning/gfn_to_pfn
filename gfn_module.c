@@ -47,7 +47,7 @@ static void gfn_log_result(const struct gfn_request *req, const struct kvm *kvm,
   else if (req && req->has_pid)
     pid = req->vm_pid;
 
-  strlcpy(msg, reply ? reply : "", sizeof(msg));
+  strscpy(msg, reply ? reply : "", sizeof(msg));
   strim(msg);
 
   pr_info("gfn_to_pfn: pid=%lu gfn=0x%lx %s", pid,
