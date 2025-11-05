@@ -50,8 +50,8 @@ static void gfn_log_result(const struct gfn_request *req, const struct kvm *kvm,
   strscpy(msg, reply ? reply : "", sizeof(msg));
   strim(msg);
 
-  pr_info("gfn_to_pfn: pid=%lu gfn=0x%lx %s", pid,
-          req ? req->raw_gfn : 0UL, msg[0] ? msg : "(empty reply)");
+  pr_info("gfn_to_pfn: pid=%lu gfn=0x%lx %s", pid, req ? req->raw_gfn : 0UL,
+          msg[0] ? msg : "(empty reply)");
 }
 
 /* --- helper: format info about page --- */
@@ -63,8 +63,7 @@ static ssize_t format_page_info(char *dst, size_t cap, struct mm_struct *mm,
   unsigned long offset = hva & 0xFFF;
 
   ret = get_user_pages_remote(mm, base_va, 1, FOLL_GET, pages, NULL);
-  if (ret <= 0)
-    return scnprintf(dst, cap, "err:gup=%ld\n", ret);
+  if (ret <= 0) return scnprintf(dst, cap, "err:gup=%ld\n", ret);
 
   {
     struct page *page = pages[0];
@@ -73,10 +72,22 @@ static ssize_t format_page_info(char *dst, size_t cap, struct mm_struct *mm,
     phys_addr_t exact_phys = phys_base | offset;
 
     const char *kind = "base";
-    if (PageTransHuge(page))
-      kind = "thp";
-    else if (PageHuge(page))
+    /*
+     * PageHuge() only returns true for hugetlbfs pages, but not for
+     * normal or transparent huge pages.
+     *
+     * PageTransHuge() returns true for both transparent huge and
+     * hugetlbfs pages, but not normal pages. PageTransHuge() can only be
+     * called only in the core VM paths where hugetlbfs pages can't exist.
+     */
+    // TODO: According to FarWrong we can not always trust them, maybe double
+    // check.
+    // What if the page is not a head?
+    struct page *head = compound_head(page);
+    if (PageHuge(head))
       kind = "hugetlb";
+    else if (PageTransHuge(head))
+      kind = "thp";
 
     ret = scnprintf(dst, cap, "ok phys=0x%llx kind=%s gpa=0x%lx hva=0x%lx\n",
                     (unsigned long long)exact_phys, kind, gpa, hva);
@@ -107,8 +118,7 @@ static long gfn_to_hva_safe(struct kvm *kvm, unsigned long full_gfn,
   gfn_t gfn = (gfn_t)(full_gfn >> 12);
   unsigned long off = full_gfn & 0xFFF;
   unsigned long hva = gfn_to_hva(kvm, gfn);
-  if (kvm_is_error_hva(hva))
-    return -EFAULT;
+  if (kvm_is_error_hva(hva)) return -EFAULT;
   *out_hva = hva | off;
   return 0;
 }
@@ -116,8 +126,7 @@ static long gfn_to_hva_safe(struct kvm *kvm, unsigned long full_gfn,
 /* --- per-file lifecycle --- */
 static int gfn_open(struct inode *ino, struct file *f) {
   struct gfn_ctx *ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
-  if (!ctx)
-    return -ENOMEM;
+  if (!ctx) return -ENOMEM;
   init_waitqueue_head(&ctx->wq);
   f->private_data = ctx;
   return 0;
@@ -138,11 +147,9 @@ static ssize_t gfn_write(struct file *file, const char __user *ubuf,
   ssize_t n;
   char kbuf[64];
 
-  if (count >= sizeof(kbuf))
-    return -E2BIG;
+  if (count >= sizeof(kbuf)) return -E2BIG;
 
-  if (copy_from_user(kbuf, ubuf, count))
-    return -EFAULT;
+  if (copy_from_user(kbuf, ubuf, count)) return -EFAULT;
 
   kbuf[count] = '\0';
   ctx->reply_ready = false;
@@ -192,14 +199,12 @@ static ssize_t gfn_read(struct file *file, char __user *ubuf, size_t len,
   struct gfn_ctx *ctx = file->private_data;
 
   if (!ctx->reply_ready) {
-    if (file->f_flags & O_NONBLOCK)
-      return -EAGAIN;
+    if (file->f_flags & O_NONBLOCK) return -EAGAIN;
     if (wait_event_interruptible(ctx->wq, ctx->reply_ready))
       return -ERESTARTSYS;
   }
 
-  if (!ctx->reply_len)
-    return 0;
+  if (!ctx->reply_len) return 0;
 
   return simple_read_from_buffer(ubuf, len, ppos, ctx->reply, ctx->reply_len);
 }
@@ -209,8 +214,7 @@ static __poll_t gfn_poll(struct file *file, poll_table *pt) {
   __poll_t m = 0;
 
   poll_wait(file, &ctx->wq, pt);
-  if (ctx->reply_ready)
-    m |= POLLIN | POLLRDNORM;
+  if (ctx->reply_ready) m |= POLLIN | POLLRDNORM;
   return m;
 }
 
@@ -224,8 +228,7 @@ static const struct proc_ops gfn_fops = {
 
 static int __init gfn_module_init(void) {
   proc_entry = proc_create(PROC_NAME, 0640, NULL, &gfn_fops);
-  if (!proc_entry)
-    return -ENOMEM;
+  if (!proc_entry) return -ENOMEM;
   pr_info("gfn_to_pfn loaded\n");
   return 0;
 }
